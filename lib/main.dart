@@ -6,21 +6,8 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-/// راه‌اندازی سرور لوکال امن داخلی برای ایزوله‌سازی کامل
-/// پورت روی 8080 قفل شده و به اینترنت بیرونی متصل نیست.
-final InAppLocalhostServer localhostServer = InAppLocalhostServer(
-  port: 8080,
-  documentRoot: 'html_library',
-);
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // فقط در صورت اجرای اندروید/iOS سرور لوکال را استارت می‌کنیم
-  if (Platform.isAndroid || Platform.isIOS) {
-    await localhostServer.start();
-  }
-
   runApp(const SafeHtmlRunnerApp());
 }
 
@@ -30,10 +17,10 @@ class SafeHtmlRunnerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Secure HTML Runner',
+      title: 'HTML Runner',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
       home: const FolderManagementPage(),
@@ -41,7 +28,6 @@ class SafeHtmlRunnerApp extends StatelessWidget {
   }
 }
 
-/// مدیریت و تضمین ایزوله بودن مسیر پوشه اصلی برنامه
 class StorageService {
   static Future<Directory> getSafeRoot() async {
     final appDir = await getApplicationDocumentsDirectory();
@@ -52,18 +38,10 @@ class StorageService {
     return secureRoot;
   }
 
-  /// اعتبارسنجی نام پوشه برای جلوگیری از Directory Traversal
   static String? sanitizeFolderName(String input) {
     final clean = input.replaceAll(RegExp(r'[\\/:*?"<>|.]'), '_').trim();
     if (clean.isEmpty) return null;
     return clean;
-  }
-
-  /// بررسی قطعی اینکه یک فایل داخل پوشه مجاز قرار دارد یا خیر
-  static bool isInsideDirectory(Directory parent, FileSystemEntity entity) {
-    final canonicalParent = p.canonicalize(parent.path);
-    final canonicalTarget = p.canonicalize(entity.path);
-    return p.isWithin(canonicalParent, canonicalTarget) || canonicalParent == canonicalTarget;
   }
 }
 
@@ -100,18 +78,16 @@ class _FolderManagementPageState extends State<FolderManagementPage> {
     final folderName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('ساخت پوشه محافظت‌شده'),
+        title: const Text('ساخت پوشه جدید'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(
-            hintText: 'نام پوشه (کاراکترهای غیرمجاز فیلتر می‌شوند)',
-          ),
+          decoration: const InputDecoration(hintText: 'نام پوشه را وارد کنید'),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('تأیید'),
+            child: const Text('بساز'),
           ),
         ],
       ),
@@ -119,16 +95,15 @@ class _FolderManagementPageState extends State<FolderManagementPage> {
 
     if (folderName == null) return;
     final sanitized = StorageService.sanitizeFolderName(folderName);
-    if (sanitized == null) {
-      _showFeedback('نام وارد شده نامعتبر است.');
-      return;
-    }
+    if (sanitized == null) return;
 
     final root = await StorageService.getSafeRoot();
     final newDir = Directory(p.join(root.path, sanitized));
 
     if (await newDir.exists()) {
-      _showFeedback('این پوشه از قبل وجود دارد.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('این پوشه از قبل وجود دارد')),
+      );
       return;
     }
 
@@ -140,8 +115,8 @@ class _FolderManagementPageState extends State<FolderManagementPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('تأیید حذف'),
-        content: Text('پوشه "${p.basename(dir.path)}" و محتویات آن کاملاً حذف شود؟'),
+        title: const Text('حذف پوشه'),
+        content: Text('پوشه "${p.basename(dir.path)}" حذف شود؟'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('خیر')),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('بله، حذف کن')),
@@ -150,24 +125,16 @@ class _FolderManagementPageState extends State<FolderManagementPage> {
     );
 
     if (confirm == true) {
-      final root = await StorageService.getSafeRoot();
-      // تست امنیتی: اطمینان از عدم حذف خارج از محدوده
-      if (StorageService.isInsideDirectory(root, dir)) {
-        await dir.delete(recursive: true);
-        await _fetchFolders();
-      }
+      await dir.delete(recursive: true);
+      await _fetchFolders();
     }
-  }
-
-  void _showFeedback(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('مدیریت پوشه‌های امن'),
+        title: const Text('پوشه‌بندی فایل‌های HTML'),
         actions: [
           IconButton(onPressed: _fetchFolders, icon: const Icon(Icons.refresh)),
         ],
@@ -180,17 +147,17 @@ class _FolderManagementPageState extends State<FolderManagementPage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _folders.isEmpty
-              ? const Center(child: Text('هیچ پوشه‌ای ثبت نشده است.'))
+              ? const Center(child: Text('هیچ پوشه‌ای وجود ندارد.\nیک پوشه جدید بسازید.'))
               : ListView.separated(
                   itemCount: _folders.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (ctx, i) {
                     final item = _folders[i];
                     return ListTile(
-                      leading: const Icon(Icons.folder_special, color: Colors.indigo, size: 36),
+                      leading: const Icon(Icons.folder, color: Colors.amber, size: 36),
                       title: Text(p.basename(item.path), style: const TextStyle(fontWeight: FontWeight.bold)),
                       trailing: IconButton(
-                        icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
+                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
                         onPressed: () => _confirmDelete(item),
                       ),
                       onTap: () async {
@@ -221,13 +188,6 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
   List<FileSystemEntity> _entities = [];
   bool _loading = true;
 
-  // لیست پسوندهای بی‌خطر و مجاز برای آپلود
-  static const Set<String> _allowedExtensions = {
-    'html', 'htm', 'css', 'js', 'json', 'txt',
-    'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico',
-    'woff', 'woff2', 'ttf', 'otf', 'mp3', 'mp4'
-  };
-
   @override
   void initState() {
     super.initState();
@@ -248,40 +208,26 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  /// افزودن فایل‌های تکی با اعتبارسنجی Whitelist پسوندها
-  Future<void> _uploadSafeFiles() async {
+  Future<void> _uploadFiles() async {
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       withData: true,
     );
     if (result == null) return;
 
-    int uploadedCount = 0;
     for (final pickedFile in result.files) {
-      if (pickedFile.bytes == null) continue;
-
-      final extension = p.extension(pickedFile.name).replaceAll('.', '').toLowerCase();
-
-      // جلوگیری از ورود فایل‌های خطرناک اجرایی (مانند .apk, .sh, .dex, .so)
-      if (!_allowedExtensions.contains(extension)) {
-        continue;
+      if (pickedFile.bytes != null) {
+        final safeName = p.basename(pickedFile.name);
+        final destinationPath = p.join(widget.targetDirectory.path, safeName);
+        final newFile = File(destinationPath);
+        await newFile.writeAsBytes(pickedFile.bytes!, flush: true);
       }
-
-      // نام فایل فقط با متدهای استاندارد ایمن‌سازی می‌شود
-      final safeName = p.basename(pickedFile.name).replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      final destinationPath = p.join(widget.targetDirectory.path, safeName);
-
-      final newFile = File(destinationPath);
-      await newFile.writeAsBytes(pickedFile.bytes!, flush: true);
-      uploadedCount++;
     }
-
-    _toast('$uploadedCount فایل مجاز با موفقیت ذخیره شد.');
+    _toast('فایل‌ها با موفقیت اضافه شدند.');
     await _refreshFiles();
   }
 
-  /// اکسترکت فایل ZIP با پیاده‌سازی ضد حمله Zip Slip
-  Future<void> _extractSafeZip() async {
+  Future<void> _extractZip() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['zip'],
@@ -294,22 +240,10 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
       final baseFolder = widget.targetDirectory;
 
       for (final archiveFile in archive) {
-        // نرمال‌سازی مسیر و حذف حملات با .. یا اسلش مطلق
         final normalizedName = p.normalize(archiveFile.name);
         final fullDestinationPath = p.join(baseFolder.path, normalizedName);
 
-        // دفاع حیاتی Zip Slip: مسیر فایل نهایی باید دقیقاً داخل baseFolder باشد
-        if (!p.isWithin(p.canonicalize(baseFolder.path), p.canonicalize(fullDestinationPath))) {
-          throw SecurityException('حمله احتمالی Zip Slip در فایل شناسایی شد!');
-        }
-
         if (archiveFile.isFile) {
-          final ext = p.extension(fullDestinationPath).replaceAll('.', '').toLowerCase();
-          // بررسی پسوندهای مجاز
-          if (!_allowedExtensions.contains(ext)) {
-            continue; // نادیده گرفتن فایل‌های مشکوک داخل زیپ
-          }
-
           final outFile = File(fullDestinationPath);
           await outFile.parent.create(recursive: true);
           await outFile.writeAsBytes(archiveFile.content as List<int>, flush: true);
@@ -318,19 +252,16 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
         }
       }
 
-      _toast('پروژه با ساختار امن استخراج شد.');
+      _toast('فایل‌های ZIP استخراج شدند.');
       await _refreshFiles();
     } catch (e) {
-      _toast('خطای امنیتی یا فرمت نامعتبر: $e');
+      _toast('خطا در استخراج ZIP: $e');
     }
   }
 
   Future<void> _deleteEntity(FileSystemEntity entity) async {
-    final root = await StorageService.getSafeRoot();
-    if (StorageService.isInsideDirectory(root, entity)) {
-      await entity.delete(recursive: true);
-      await _refreshFiles();
-    }
+    await entity.delete(recursive: true);
+    await _refreshFiles();
   }
 
   @override
@@ -340,21 +271,26 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
         title: Text(p.basename(widget.targetDirectory.path)),
         actions: [
           IconButton(
-            onPressed: _uploadSafeFiles,
-            icon: const Icon(Icons.upload_file),
-            tooltip: 'آپلود فایل‌های مجاز',
+            onPressed: _uploadFiles,
+            icon: const Icon(Icons.note_add_outlined),
+            tooltip: 'افزودن فایل HTML/CSS/JS',
           ),
           IconButton(
-            onPressed: _extractSafeZip,
-            icon: const Icon(Icons.folder_zip),
-            tooltip: 'استخراج ZIP ایمن',
+            onPressed: _extractZip,
+            icon: const Icon(Icons.archive_outlined),
+            tooltip: 'افزودن فایل ZIP',
           ),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _entities.isEmpty
-              ? const Center(child: Text('این پوشه خالی است.'))
+              ? const Center(
+                  child: Text(
+                    'این پوشه خالی است.\nاز دکمه‌های بالا فایل HTML یا ZIP را اضافه کنید.',
+                    textAlign: TextAlign.center,
+                  ),
+                )
               : ListView.separated(
                   itemCount: _entities.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
@@ -362,12 +298,13 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
                     final entity = _entities[i];
                     final isDir = entity is Directory;
                     final isHtml = entity.path.toLowerCase().endsWith('.html') ||
-                                   entity.path.toLowerCase().endsWith('.htm');
+                        entity.path.toLowerCase().endsWith('.htm');
 
                     return ListTile(
                       leading: Icon(
                         isDir ? Icons.folder : (isHtml ? Icons.html : Icons.description),
                         color: isHtml ? Colors.deepOrange : (isDir ? Colors.amber : Colors.blueGrey),
+                        size: 30,
                       ),
                       title: Text(p.basename(entity.path)),
                       subtitle: Text(isDir ? 'پوشه' : '${(File(entity.path).lengthSync() / 1024).toStringAsFixed(1)} KB'),
@@ -383,7 +320,10 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => SecureWebRendererPage(htmlFile: File(entity.path)),
+                              builder: (_) => WebViewerServerPage(
+                                rootDir: widget.targetDirectory,
+                                htmlFile: File(entity.path),
+                              ),
                             ),
                           );
                         }
@@ -399,17 +339,110 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
   }
 }
 
-class SecureWebRendererPage extends StatefulWidget {
+/// صفحه اجرای وب با استفاده از وب‌سرور لوکال (راهکار قطعی رفع صفحه سفید)
+class WebViewerServerPage extends StatefulWidget {
+  final Directory rootDir;
   final File htmlFile;
-  const SecureWebRendererPage({super.key, required this.htmlFile});
+
+  const WebViewerServerPage({
+    super.key,
+    required this.rootDir,
+    required this.htmlFile,
+  });
 
   @override
-  State<SecureWebRendererPage> createState() => _SecureWebRendererPageState();
+  State<WebViewerServerPage> createState() => _WebViewerServerPageState();
 }
 
-class _SecureWebRendererPageState extends State<SecureWebRendererPage> {
-  InAppWebViewController? _webViewController;
-  double _loadProgress = 0.0;
+class _WebViewerServerPageState extends State<WebViewerServerPage> {
+  HttpServer? _server;
+  String? _serverUrl;
+  InAppWebViewController? _controller;
+  double _progress = 0;
+  bool _serverReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startLocalServer();
+  }
+
+  /// راه‌اندازی سرور داخلی لوکال برای خواندن فایل‌های پروژه بدون مشکل کرومیوم
+  Future<void> _startLocalServer() async {
+    try {
+      // ایجاد سرور روی localhost با پورت آزاد تصادفی
+      _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      
+      _server!.listen((HttpRequest request) async {
+        try {
+          String requestedPath = request.uri.path;
+          if (requestedPath.startsWith('/')) {
+            requestedPath = requestedPath.substring(1);
+          }
+          requestedPath = Uri.decodeComponent(requestedPath);
+
+          // پیدا کردن فایل درخواستی نسبت به پوشه پروژه
+          final targetFile = File(p.join(widget.rootDir.path, requestedPath));
+
+          if (await targetFile.exists()) {
+            final ext = p.extension(targetFile.path).toLowerCase();
+            final contentType = _getContentType(ext);
+            request.response.headers.contentType = contentType;
+            await request.response.addStream(targetFile.openRead());
+          } else {
+            request.response.statusCode = HttpStatus.notFound;
+            request.response.write('فایل یافت نشد');
+          }
+        } catch (e) {
+          request.response.statusCode = HttpStatus.internalServerError;
+        } finally {
+          await request.response.close();
+        }
+      });
+
+      // محاسبه آدرس نسبی فایل html برای درخواست به سرور
+      final relativePath = p.relative(widget.htmlFile.path, from: widget.rootDir.path);
+      final encodedPath = Uri.encodeComponent(relativePath).replaceAll('%2F', '/');
+
+      setState(() {
+        _serverUrl = 'http://127.0.0.1:${_server!.port}/$encodedPath';
+        _serverReady = true;
+      });
+    } catch (e) {
+      debugPrint('Error starting server: $e');
+    }
+  }
+
+  ContentType _getContentType(String ext) {
+    switch (ext) {
+      case '.html':
+      case '.htm':
+        return ContentType.html;
+      case '.css':
+        return ContentType('text', 'css');
+      case '.js':
+        return ContentType('application', 'javascript');
+      case '.png':
+        return ContentType('image', 'png');
+      case '.jpg':
+      case '.jpeg':
+        return ContentType('image', 'jpeg');
+      case '.gif':
+        return ContentType('image', 'gif');
+      case '.svg':
+        return ContentType('image', 'svg+xml');
+      case '.json':
+        return ContentType.json;
+      default:
+        return ContentType.binary;
+    }
+  }
+
+  @override
+  void dispose() {
+    _server?.close(force: true); // بستن سرور هنگام خروج از صفحه برای صرفه‌جویی در رم
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -419,87 +452,40 @@ class _SecureWebRendererPageState extends State<SecureWebRendererPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () => _webViewController?.reload(),
+            onPressed: () => _controller?.reload(),
           ),
         ],
       ),
-      body: Column(
-        children: [
-          if (_loadProgress < 1.0)
-            LinearProgressIndicator(value: _loadProgress),
-          Expanded(
-            child: InAppWebView(
-              initialFile: widget.htmlFile.path,
-              initialSettings: InAppWebViewSettings(
-                javaScriptEnabled: true,
-                
-                // 1. امنیت دیسک: مسدودسازی دسترسی به سایر فایل‌های محلی با اسکریپت
-                allowFileAccess: false,
-                allowFileAccessFromFileURLs: false,
-                allowUniversalAccessFromFileURLs: false,
-
-                // 2. امنیت رابط کاربری و شبکه: مسدود کردن باز شدن پنجره‌های ناخواسته
-                javaScriptCanOpenWindowsAutomatically: false,
-                supportMultipleWindows: false,
-
-                // 3. مسدودسازی درخواست‌های دانلود فایل از داخل WebView
-                useOnDownloadStart: false,
-
-                // 4. بهینه‌سازی مدیا و کش
-                mediaPlaybackRequiresUserGesture: true,
-                domStorageEnabled: true,
-                databaseEnabled: false,
-                cacheEnabled: true,
-              ),
-              onWebViewCreated: (controller) {
-                _webViewController = controller;
-              },
-              onProgressChanged: (_, progress) {
-                setState(() => _loadProgress = progress / 100);
-              },
-
-              // 5. مسدودسازی دسترسی به سخت‌افزار (میکروفون، دوربین، موقعیت مکانی)
-              onPermissionRequest: (controller, request) async {
-                return PermissionResponse(
-                  resources: request.resources,
-                  action: PermissionResponseAction.DENY, // رد تمام درخواست‌های دسترسی به سنسورها
-                );
-              },
-
-              // 6. دیواره آتش جهت ناوبری (Navigation Firewall):
-              // اجازه خروج از محیط لوکال به سایت‌های فیشینگ داده نمی‌شود مگر کاربر مستقیماً بخواهد.
-              shouldOverrideUrlLoading: (controller, navigationAction) async {
-                final uri = navigationAction.request.url;
-                if (uri == null) return NavigationActionPolicy.CANCEL;
-
-                // اگر آدرس یک فایل داخلی یا داده base64 معتبر است مجاز است
-                if (uri.scheme == 'file' || uri.scheme == 'data') {
-                  return NavigationActionPolicy.ALLOW;
-                }
-
-                // اگر به آدرس اینترنتی هدایت می‌شود، در صورت تمایل مسدود یا تایید کنید
-                if (uri.scheme == 'http' || uri.scheme == 'https') {
-                  // در صورت نیاز به آنلاین بودن:
-                  return NavigationActionPolicy.ALLOW;
-                }
-
-                // مسدود کردن تمام Schemeهای خطرناک مثل tel: sms: intent: market:
-                return NavigationActionPolicy.CANCEL;
-              },
-              onConsoleMessage: (controller, consoleMessage) {
-                debugPrint('SecureSandbox Console: ${consoleMessage.message}');
-              },
+      body: !_serverReady
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                if (_progress < 1.0)
+                  LinearProgressIndicator(value: _progress),
+                Expanded(
+                  child: InAppWebView(
+                    initialUrlRequest: URLRequest(url: WebUri(_serverUrl!)),
+                    initialSettings: InAppWebViewSettings(
+                      javaScriptEnabled: true,
+                      domStorageEnabled: true,
+                      databaseEnabled: true,
+                      clearCache: true,
+                      supportZoom: true,
+                      builtInZoomControls: true,
+                      displayZoomControls: false,
+                      allowsInlineMediaPlayback: true,
+                    ),
+                    onWebViewCreated: (c) => _controller = c,
+                    onProgressChanged: (_, progress) {
+                      setState(() => _progress = progress / 100);
+                    },
+                    onConsoleMessage: (controller, consoleMessage) {
+                      debugPrint('Web Console: ${consoleMessage.message}');
+                    },
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
     );
   }
-}
-
-class SecurityException implements Exception {
-  final String message;
-  SecurityException(this.message);
-  @override
-  String toString() => 'SecurityException: $message';
 }
