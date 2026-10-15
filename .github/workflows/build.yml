@@ -20,20 +20,32 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.24.3'
           channel: 'stable'
 
-      - name: Create Android scaffolding
-        run: flutter create . --platforms=android --org com.example
-
-      - name: Fix Android Manifest and MinSdkVersion
+      - name: Generate Fresh Project Scaffolding
         run: |
-          # اضافه کردن مجوز اینترنت
+          # ذخیره فایل‌های اصلی در یک پوشه موقت تا خراب نشوند
+          mkdir -p /tmp/backup
+          cp pubspec.yaml /tmp/backup/
+          cp -r lib /tmp/backup/
+
+          # ساخت تمیز ساختار اندروید
+          flutter create . --platforms=android --org com.example.htmlrunner --project-name html_runner
+
+          # برگرداندن فایل‌های اصلی
+          cp /tmp/backup/pubspec.yaml ./pubspec.yaml
+          cp -r /tmp/backup/lib ./
+
+      - name: Configure Android Gradle & Permissions
+        run: |
+          # اضافه کردن مجوز دسترسی به اینترنت
           sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
           
-          # افزایش minSdkVersion به 21 برای سازگاری با InAppWebView
-          sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g' android/app/build.gradle
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle
+          # ست کردن minSdkVersion روی 21 که WebView نیاز دارد
+          sed -i 's/minSdkVersion.*/minSdkVersion = 21/g' android/app/build.gradle || true
+          sed -i 's/minSdk =.*/minSdk = 21/g' android/app/build.gradle || true
+          sed -i 's/compileSdk =.*/compileSdk = 34/g' android/app/build.gradle || true
 
       - name: Get Dependencies
         run: flutter pub get
